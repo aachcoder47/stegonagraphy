@@ -3,43 +3,41 @@ import * as Crypto from './crypto';
 import * as Stego from './steganography';
 import * as ImageStego from './imageSteganography';
 
+// Helpers
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+export interface StegoResult {
+    type: 'text' | 'file';
+    content: string | Uint8Array;
+}
+
 export const hideMessage = async (secret: string, cover: string, password: string): Promise<string> => {
-    console.log('Starting Hide Process...');
+    // 1. Compress (Text -> Uint8Array)
+    const compressed = Compression.compressText(secret);
 
-    // 1. Compress
-    console.log('1. Compressing...');
-    const compressed = Compression.compress(secret);
-
-    // 2. Encrypt
-    console.log('2. Encrypting...');
+    // 2. Encrypt (Uint8Array -> Package)
     const encryptedPkg = await Crypto.encrypt(compressed, password);
 
-    // 3. Serialize Package
-    // Format: "salt|iv|hmac|payload"
+    // 3. Serialize Package (Package -> String)
     const serialized = `${encryptedPkg.salt}|${encryptedPkg.iv}|${encryptedPkg.hmac}|${encryptedPkg.payload}`;
 
-    // 4. Encode to ZWC
-    console.log('3. Encoding to ZWC...');
+    // 4. Encode to ZWC (String -> BinaryString -> ZWC)
     const binary = Stego.stringToBinary(serialized);
     const zwcPayload = Stego.binaryToZWC(binary);
 
     // 5. Embed
-    console.log('4. Embedding...');
     return Stego.embed(cover, zwcPayload);
 };
 
 export const revealMessage = async (stegoText: string, password: string): Promise<string> => {
-    console.log('Starting Reveal Process...');
-
     // 1. Extract ZWCs
-    console.log('1. Extracting...');
     const zwcPayload = Stego.extract(stegoText);
     if (!zwcPayload) {
         throw new Error('No hidden message found (No ZWCs detected).');
     }
 
     // 2. Decode ZWC to String
-    console.log('2. Decoding ZWC...');
     const binary = Stego.zwcToBinary(zwcPayload);
     const serialized = Stego.binaryToString(binary);
 
@@ -51,54 +49,84 @@ export const revealMessage = async (stegoText: string, password: string): Promis
     const [salt, iv, hmac, payload] = parts;
     const pkg: Crypto.EncryptedPackage = { salt, iv, hmac, payload };
 
-    // 4. Decrypt
-    console.log('3. Decrypting...');
-    const compressed = await Crypto.decrypt(pkg, password);
+    // 4. Decrypt (Package -> Uint8Array)
+    const decryptedBytes = await Crypto.decrypt(pkg, password);
 
-    // 5. Decompress
-    console.log('4. Decompressing...');
-    return Compression.decompress(compressed);
+    // 5. Decompress (Uint8Array -> String)
+    return Compression.decompressText(decryptedBytes);
 };
 
-export const hideMessageInImage = async (secret: string, coverImageInfo: string, password: string): Promise<string> => {
-    console.log('Starting Image Hide Process...');
+export const hideMessageInImage = async (secret: string | Uint8Array, coverImageInfo: string, password: string): Promise<string> => {
+    // Prefix 1 byte to indicate type: 0 = text, 1 = file
+    let payload: Uint8Array;
 
-    // 1. Compress
-    const compressed = Compression.compress(secret);
+    if (typeof secret === 'string') {
+        const textBytes = Compression.compressText(secret);
+        payload = new Uint8Array(textBytes.length + 1);
+        payload[0] = 0; // Text header
+        payload.set(textBytes, 1);
+    } else {
+        // File: Just wrap
+        payload = new Uint8Array(secret.length + 1);
+        payload[0] = 1; // File header
+        payload.set(secret, 1);
+    }
 
-    // 2. Encrypt
-    const encryptedPkg = await Crypto.encrypt(compressed, password);
+    // Encrypt
+    const encryptedPkg = await Crypto.encrypt(payload, password);
 
-    // 3. Serialize Package
+    // Serialize Package to String "salt|iv..."
     const serialized = `${encryptedPkg.salt}|${encryptedPkg.iv}|${encryptedPkg.hmac}|${encryptedPkg.payload}`;
 
-    // 4. Embed in Image
+    // Convert serialized string to Uint8Array for image embedding
+    const serializedBytes = enc.encode(serialized);
+
+    // Embed in Image
     const img = await ImageStego.loadImage(coverImageInfo);
-    return ImageStego.embedInImage(img, serialized);
+    return ImageStego.embedInImage(img, serializedBytes);
 }
 
-export const revealMessageFromImage = async (stegoImageInfo: string, password: string): Promise<string> => {
-    console.log('Starting Image Reveal Process...');
-
+export const revealMessageFromImage = async (stegoImageInfo: string, password: string): Promise<StegoResult> => {
     // 1. Extract from Image
     const img = await ImageStego.loadImage(stegoImageInfo);
-    const serialized = await ImageStego.extractFromImage(img);
+    const serializedBytes = await ImageStego.extractFromImage(img);
 
-    if (!serialized) {
+    if (!serializedBytes) {
         throw new Error('No hidden message found in image.');
     }
+
+    // Convert bytes back to string "salt|iv..."
+    const serialized = dec.decode(serializedBytes);
 
     // 2. Deserialize
     const parts = serialized.split('|');
     if (parts.length !== 4) {
+        // If split fail, it might be that extracted bytes are garbage
         throw new Error('Corrupted or invalid hidden data.');
     }
     const [salt, iv, hmac, payload] = parts;
     const pkg: Crypto.EncryptedPackage = { salt, iv, hmac, payload };
 
     // 3. Decrypt
-    const compressed = await Crypto.decrypt(pkg, password);
+    const decryptedBytes = await Crypto.decrypt(pkg, password);
 
-    // 4. Decompress
-    return Compression.decompress(compressed);
+    // 4. Check Type Header
+    const typeHeader = decryptedBytes[0];
+    const contentBytes = decryptedBytes.slice(1);
+
+    if (typeHeader === 0) {
+        // Text
+        return {
+            type: 'text',
+            content: Compression.decompressText(contentBytes)
+        };
+    } else if (typeHeader === 1) {
+        // File
+        return {
+            type: 'file',
+            content: contentBytes
+        };
+    } else {
+        throw new Error('Unknown data type in hidden message.');
+    }
 }

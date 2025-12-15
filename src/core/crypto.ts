@@ -92,18 +92,18 @@ export interface EncryptedPackage {
   hmac: string;    // Base64
 }
 
-export const encrypt = async (text: string, password: string): Promise<EncryptedPackage> => {
+export const encrypt = async (data: Uint8Array, password: string): Promise<EncryptedPackage> => {
   const salt = generateSalt();
   const iv = window.crypto.getRandomValues(new Uint8Array(IV_LENGTH));
 
   const key = await deriveKey(password, salt);
   const hmacKey = await deriveHmacKey(password, salt);
 
-  const enc = new TextEncoder();
+  // Data is already Uint8Array, no need to encode
   const encryptedBuf = await window.crypto.subtle.encrypt(
     { name: "AES-CTR", counter: iv, length: 64 },
     key,
-    enc.encode(text)
+    data
   );
 
   // Sign the encrypted payload
@@ -121,7 +121,7 @@ export const encrypt = async (text: string, password: string): Promise<Encrypted
   };
 };
 
-export const decrypt = async (pkg: EncryptedPackage, password: string): Promise<string> => {
+export const decrypt = async (pkg: EncryptedPackage, password: string): Promise<Uint8Array> => {
   const salt = base64ToBuffer(pkg.salt); // Now returns Uint8Array
   const iv = base64ToBuffer(pkg.iv); // Now returns Uint8Array
   const encryptedBuf = base64ToBuffer(pkg.payload); // Now returns Uint8Array
@@ -148,7 +148,6 @@ export const decrypt = async (pkg: EncryptedPackage, password: string): Promise<
     encryptedBuf as any
   );
 
-  const dec = new TextDecoder();
-  return dec.decode(decryptedBuf);
+  return new Uint8Array(decryptedBuf);
 };
 

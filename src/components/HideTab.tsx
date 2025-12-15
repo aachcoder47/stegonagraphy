@@ -5,31 +5,58 @@ import { readFileAsDataURL } from '../core/imageSteganography';
 
 const HideTab: React.FC = () => {
     const [mode, setMode] = useState<'text' | 'image'>('text');
-    const [secret, setSecret] = useState('');
-    const [cover, setCover] = useState('');
+    const [secretType, setSecretType] = useState<'text' | 'file'>('text');
+
+    // Secret inputs
+    const [secretText, setSecretText] = useState('');
+    const [secretFile, setSecretFile] = useState<File | null>(null);
+
+    // Cover inputs
+    const [coverText, setCoverText] = useState('');
     const [coverImage, setCoverImage] = useState<File | null>(null);
     const [coverImagePreview, setCoverImagePreview] = useState<string | null>(null);
+
     const [password, setPassword] = useState('');
 
-    // Result can be string (text mode) or dataURL (image mode)
+    // Result
     const [cloaked, setCloaked] = useState('');
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
 
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const coverFileInputRef = useRef<HTMLInputElement>(null);
+    const secretFileInputRef = useRef<HTMLInputElement>(null);
 
     // Metrics
-    const secretSize = new Blob([secret]).size;
-    const zwcCount = mode === 'text' && cloaked ? cloaked.length - cover.length : 0;
+    const secretSize = secretType === 'text'
+        ? new Blob([secretText]).size
+        : (secretFile?.size || 0);
+
+    const zwcCount = mode === 'text' && cloaked ? cloaked.length - coverText.length : 0;
 
     const handleHide = async () => {
         setError(null);
         setCloaked('');
 
-        if (!secret || !password) {
-            setError('Please provide secret text and a password.');
+        if (!password) {
+            setError('Please provide a password.');
+            return;
+        }
+
+        if (mode === 'text' && secretType === 'file') {
+            // Should not happen via UI, but safe guard
+            setError('File steganography is only available in Image Mode.');
+            setSecretType('text');
+            return;
+        }
+
+        if (secretType === 'text' && !secretText) {
+            setError('Please enter a secret message.');
+            return;
+        }
+        if (secretType === 'file' && !secretFile) {
+            setError('Please upload a secret file.');
             return;
         }
 
@@ -41,12 +68,23 @@ const HideTab: React.FC = () => {
         setLoading(true);
         try {
             if (mode === 'text') {
-                const finalCover = cover || 'This is a cover message.';
-                const result = await hideMessage(secret, finalCover, password);
+                const finalCover = coverText || 'This is a cover message.';
+                const result = await hideMessage(secretText, finalCover, password);
                 setCloaked(result);
             } else {
                 if (!coverImagePreview) return;
-                const result = await hideMessageInImage(secret, coverImagePreview, password);
+
+                let secretPayload: string | Uint8Array;
+                if (secretType === 'text') {
+                    secretPayload = secretText;
+                } else {
+                    if (!secretFile) return;
+                    // Read file as ArrayBuffer -> Uint8Array
+                    const buffer = await secretFile.arrayBuffer();
+                    secretPayload = new Uint8Array(buffer);
+                }
+
+                const result = await hideMessageInImage(secretPayload, coverImagePreview, password);
                 setCloaked(result);
             }
         } catch (err: any) {
@@ -56,7 +94,7 @@ const HideTab: React.FC = () => {
         }
     };
 
-    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleCoverImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
             if (!file.type.startsWith('image/')) {
@@ -64,9 +102,14 @@ const HideTab: React.FC = () => {
                 return;
             }
             setCoverImage(file);
-            // Read for preview
             readFileAsDataURL(file).then(setCoverImagePreview).catch(() => setError('Failed to read image.'));
-            setCloaked(''); // clear previous result
+            setCloaked('');
+        }
+    };
+
+    const handleSecretFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            setSecretFile(e.target.files[0]);
         }
     };
 
@@ -92,7 +135,7 @@ const HideTab: React.FC = () => {
             <div className="flex justify-center mb-6">
                 <div className="bg-gray-900 p-1 rounded-xl flex gap-1 border border-gray-700">
                     <button
-                        onClick={() => { setMode('text'); setCloaked(''); setError(null); }}
+                        onClick={() => { setMode('text'); setSecretType('text'); setCloaked(''); setError(null); }}
                         className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all ${mode === 'text' ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
                     >
                         <FileText size={16} /> Text Mode
@@ -106,20 +149,69 @@ const HideTab: React.FC = () => {
                 </div>
             </div>
 
-            {/* Secret Input */}
+            {/* Secret Input Section */}
             <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">Secret Message</label>
-                <div className="relative">
-                    <textarea
-                        value={secret}
-                        onChange={(e) => setSecret(e.target.value)}
-                        className="w-full h-32 bg-gray-900 border border-gray-700 rounded-lg p-3 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition text-sm"
-                        placeholder="Enter the secret you want to hide..."
-                    />
-                    <div className="absolute bottom-2 right-2 text-xs text-gray-500">
-                        {secretSize} bytes
-                    </div>
+                <div className="flex items-center justify-between">
+                    <label className="block text-sm font-medium text-gray-300">Secret Content</label>
+
+                    {/* Secret Type Toggle (Image Mode Only) */}
+                    {mode === 'image' && (
+                        <div className="flex bg-gray-800 rounded-lg p-0.5">
+                            <button
+                                onClick={() => setSecretType('text')}
+                                className={`px-3 py-1 text-xs rounded-md transition-all ${secretType === 'text' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                            >
+                                Text
+                            </button>
+                            <button
+                                onClick={() => setSecretType('file')}
+                                className={`px-3 py-1 text-xs rounded-md transition-all ${secretType === 'file' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                            >
+                                File
+                            </button>
+                        </div>
+                    )}
                 </div>
+
+                {secretType === 'text' ? (
+                    <div className="relative">
+                        <textarea
+                            value={secretText}
+                            onChange={(e) => setSecretText(e.target.value)}
+                            className="w-full h-32 bg-gray-900 border border-gray-700 rounded-lg p-3 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition text-sm"
+                            placeholder="Enter the secret you want to hide..."
+                        />
+                        <div className="absolute bottom-2 right-2 text-xs text-gray-500">
+                            {secretSize} bytes
+                        </div>
+                    </div>
+                ) : (
+                    <div
+                        className="w-full h-32 border-2 border-dashed border-gray-700 hover:border-indigo-500 rounded-lg flex flex-col items-center justify-center cursor-pointer bg-gray-900/50 transition-colors"
+                        onClick={() => secretFileInputRef.current?.click()}
+                    >
+                        <input
+                            type="file"
+                            ref={secretFileInputRef}
+                            className="hidden"
+                            onChange={handleSecretFileUpload}
+                        />
+                        {secretFile ? (
+                            <div className="text-center p-4">
+                                <p className="text-indigo-400 font-medium truncate max-w-xs">{secretFile.name}</p>
+                                <p className="text-gray-500 text-xs mt-1">{(secretFile.size / 1024).toFixed(2)} KB</p>
+                            </div>
+                        ) : (
+                            <div className="text-center text-gray-500">
+                                <Upload className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                <span className="text-sm">Click to upload secret file</span>
+                            </div>
+                        )}
+                        <div className="absolute bottom-2 right-2 text-xs text-gray-500">
+                            {secretSize} bytes
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Cover Input */}
@@ -130,22 +222,22 @@ const HideTab: React.FC = () => {
 
                 {mode === 'text' ? (
                     <textarea
-                        value={cover}
-                        onChange={(e) => setCover(e.target.value)}
+                        value={coverText}
+                        onChange={(e) => setCoverText(e.target.value)}
                         className="w-full h-24 bg-gray-900 border border-gray-700 rounded-lg p-3 text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition text-sm"
                         placeholder="Enter a boring text to hide the secret in..."
                     />
                 ) : (
                     <div
                         className="w-full h-32 border-2 border-dashed border-gray-700 hover:border-indigo-500 rounded-lg flex flex-col items-center justify-center cursor-pointer bg-gray-900/50 transition-colors"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => coverFileInputRef.current?.click()}
                     >
                         <input
                             type="file"
-                            ref={fileInputRef}
+                            ref={coverFileInputRef}
                             className="hidden"
                             accept="image/*"
-                            onChange={handleImageUpload}
+                            onChange={handleCoverImageUpload}
                         />
                         {coverImagePreview ? (
                             <img src={coverImagePreview} alt="Preview" className="h-full object-contain p-2" />
