@@ -13,7 +13,7 @@ const HideTab: React.FC = () => {
 
     // Cover inputs
     const [coverText, setCoverText] = useState('');
-    const [coverImage, setCoverImage] = useState<File | null>(null);
+    // const [coverImage, setCoverImage] = useState<File | null>(null); // Removed
     const [coverImagePreview, setCoverImagePreview] = useState<string | null>(null);
 
     const [password, setPassword] = useState('');
@@ -101,7 +101,7 @@ const HideTab: React.FC = () => {
                 setError('Please upload a valid image file.');
                 return;
             }
-            setCoverImage(file);
+            // setCoverImage(file); // Removed unused state
             readFileAsDataURL(file).then(setCoverImagePreview).catch(() => setError('Failed to read image.'));
             setCloaked('');
         }

@@ -1,15 +1,17 @@
 import { useState, useRef } from 'react';
-import { Lock, Unlock, AlertTriangle, Image as ImageIcon, FileText, Upload } from 'lucide-react';
-import { revealMessage, revealMessageFromImage } from '../core/service';
+import { Lock, Unlock, AlertTriangle, Image as ImageIcon, FileText, Upload, Download } from 'lucide-react';
+import { revealMessage, revealMessageFromImage, type StegoResult } from '../core/service';
 import { readFileAsDataURL } from '../core/imageSteganography';
 
 const RevealTab: React.FC = () => {
     const [mode, setMode] = useState<'text' | 'image'>('text');
     const [cloakedText, setCloakedText] = useState('');
-    const [stegoImage, setStegoImage] = useState<File | null>(null);
+    // const [stegoImage, setStegoImage] = useState<File | null>(null); // Removed
     const [stegoImagePreview, setStegoImagePreview] = useState<string | null>(null);
     const [password, setPassword] = useState('');
-    const [revealed, setRevealed] = useState('');
+
+    const [revealed, setRevealed] = useState<StegoResult | null>(null);
+
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +19,7 @@ const RevealTab: React.FC = () => {
 
     const handleReveal = async () => {
         setError(null);
-        setRevealed('');
+        setRevealed(null);
 
         if (mode === 'text' && !cloakedText) {
             setError('Please provide the cloaked text.');
@@ -35,14 +37,14 @@ const RevealTab: React.FC = () => {
 
         setLoading(true);
         try {
-            let result = '';
             if (mode === 'text') {
-                result = await revealMessage(cloakedText, password);
+                const resultStr = await revealMessage(cloakedText, password);
+                setRevealed({ type: 'text', content: resultStr });
             } else {
                 if (!stegoImagePreview) return;
-                result = await revealMessageFromImage(stegoImagePreview, password);
+                const result = await revealMessageFromImage(stegoImagePreview, password);
+                setRevealed(result);
             }
-            setRevealed(result);
         } catch (err: any) {
             console.error(err);
             setError(err.message || 'Failed to reveal. Password might be wrong or message tampered.');
@@ -58,9 +60,24 @@ const RevealTab: React.FC = () => {
                 setError('Please upload a valid image file.');
                 return;
             }
-            setStegoImage(file);
+            // setStegoImage(file); // Removed
             readFileAsDataURL(file).then(setStegoImagePreview).catch(() => setError('Failed to read image.'));
+            setRevealed(null);
         }
+    };
+
+    const downloadRevealedFile = () => {
+        if (!revealed || revealed.type !== 'file' || !(revealed.content instanceof Uint8Array)) return;
+
+        const blob = new Blob([revealed.content as any], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `secret-file-${Date.now()}.bin`; // We don't have original filename, maybe adding it to metadata later would be good.
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
     };
 
     return (
@@ -69,13 +86,13 @@ const RevealTab: React.FC = () => {
             <div className="flex justify-center mb-6">
                 <div className="bg-gray-900 p-1 rounded-xl flex gap-1 border border-gray-700">
                     <button
-                        onClick={() => { setMode('text'); setRevealed(''); setError(null); }}
+                        onClick={() => { setMode('text'); setRevealed(null); setError(null); }}
                         className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all ${mode === 'text' ? 'bg-cyan-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
                     >
                         <FileText size={16} /> Text Mode
                     </button>
                     <button
-                        onClick={() => { setMode('image'); setRevealed(''); setError(null); }}
+                        onClick={() => { setMode('image'); setRevealed(null); setError(null); }}
                         className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all ${mode === 'image' ? 'bg-cyan-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
                     >
                         <ImageIcon size={16} /> Image Mode
@@ -170,11 +187,25 @@ const RevealTab: React.FC = () => {
                 <div className="space-y-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <label className="block text-sm font-medium text-cyan-400">Revealed Secret</label>
                     <div className="relative">
-                        <textarea
-                            readOnly
-                            value={revealed}
-                            className="w-full h-40 bg-gray-950 border border-cyan-900/50 rounded-lg p-4 text-gray-100 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 text-base leading-relaxed"
-                        />
+                        {revealed.type === 'text' && typeof revealed.content === 'string' ? (
+                            <textarea
+                                readOnly
+                                value={revealed.content}
+                                className="w-full h-40 bg-gray-950 border border-cyan-900/50 rounded-lg p-4 text-gray-100 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 text-base leading-relaxed"
+                            />
+                        ) : (
+                            <div className="bg-gray-950 border border-cyan-900/50 rounded-lg p-6 flex flex-col items-center justify-center gap-3">
+                                <p className="text-gray-300">Hidden file found</p>
+                                <button
+                                    onClick={downloadRevealedFile}
+                                    className="flex items-center gap-2 px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white rounded-lg transition-colors shadow-lg shadow-cyan-900/20"
+                                >
+                                    <Download size={18} /> Download Rescued File
+                                </button>
+                                <p className="text-xs text-gray-500">File size: {revealed.content.length} bytes</p>
+                            </div>
+                        )}
+
                         <div className="absolute top-0 right-0 p-2">
                             <span className="text-xs px-2 py-1 bg-cyan-900/30 text-cyan-500 rounded-full border border-cyan-900/50">Verified</span>
                         </div>
