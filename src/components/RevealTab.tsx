@@ -1,28 +1,47 @@
-import { useState } from 'react';
-import { Lock, Unlock, AlertTriangle } from 'lucide-react';
-import { revealMessage } from '../core/service';
+import { useState, useRef } from 'react';
+import { Lock, Unlock, AlertTriangle, Image as ImageIcon, FileText, Upload } from 'lucide-react';
+import { revealMessage, revealMessageFromImage } from '../core/service';
+import { readFileAsDataURL } from '../core/imageSteganography';
 
 const RevealTab: React.FC = () => {
+    const [mode, setMode] = useState<'text' | 'image'>('text');
     const [cloakedText, setCloakedText] = useState('');
+    const [stegoImage, setStegoImage] = useState<File | null>(null);
+    const [stegoImagePreview, setStegoImagePreview] = useState<string | null>(null);
     const [password, setPassword] = useState('');
     const [revealed, setRevealed] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     const handleReveal = async () => {
         setError(null);
         setRevealed('');
 
-        if (!cloakedText || !password) {
-            setError('Please allow paste the cloaked text and enter the password.');
+        if (mode === 'text' && !cloakedText) {
+            setError('Please provide the cloaked text.');
+            return;
+        }
+        if (mode === 'image' && !stegoImagePreview) {
+            setError('Please upload the stego image.');
+            return;
+        }
+
+        if (!password) {
+            setError('Please enter the password.');
             return;
         }
 
         setLoading(true);
         try {
-            const result = await revealMessage(cloakedText, password);
-            // Wait a bit to show loading state (optional UX feel)
-            // await new Promise(r => setTimeout(r, 500)); 
+            let result = '';
+            if (mode === 'text') {
+                result = await revealMessage(cloakedText, password);
+            } else {
+                if (!stegoImagePreview) return;
+                result = await revealMessageFromImage(stegoImagePreview, password);
+            }
             setRevealed(result);
         } catch (err: any) {
             console.error(err);
@@ -32,17 +51,73 @@ const RevealTab: React.FC = () => {
         }
     };
 
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            const file = e.target.files[0];
+            if (!file.type.startsWith('image/')) {
+                setError('Please upload a valid image file.');
+                return;
+            }
+            setStegoImage(file);
+            readFileAsDataURL(file).then(setStegoImagePreview).catch(() => setError('Failed to read image.'));
+        }
+    };
+
     return (
         <div className="space-y-6">
+            {/* Mode Toggle */}
+            <div className="flex justify-center mb-6">
+                <div className="bg-gray-900 p-1 rounded-xl flex gap-1 border border-gray-700">
+                    <button
+                        onClick={() => { setMode('text'); setRevealed(''); setError(null); }}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all ${mode === 'text' ? 'bg-cyan-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                        <FileText size={16} /> Text Mode
+                    </button>
+                    <button
+                        onClick={() => { setMode('image'); setRevealed(''); setError(null); }}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all ${mode === 'image' ? 'bg-cyan-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                        <ImageIcon size={16} /> Image Mode
+                    </button>
+                </div>
+            </div>
+
             {/* Cloaked Input */}
             <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">Cloaked Message</label>
-                <textarea
-                    value={cloakedText}
-                    onChange={(e) => setCloakedText(e.target.value)}
-                    className="w-full h-32 bg-gray-900 border border-gray-700 rounded-lg p-3 text-gray-200 focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition text-sm font-mono"
-                    placeholder="Paste the text containing hidden message here..."
-                />
+                <label className="block text-sm font-medium text-gray-300">
+                    {mode === 'text' ? 'Cloaked Message' : 'Stego Image'}
+                </label>
+
+                {mode === 'text' ? (
+                    <textarea
+                        value={cloakedText}
+                        onChange={(e) => setCloakedText(e.target.value)}
+                        className="w-full h-32 bg-gray-900 border border-gray-700 rounded-lg p-3 text-gray-200 focus:ring-2 focus:ring-cyan-500 focus:border-transparent transition text-sm font-mono"
+                        placeholder="Paste the text containing hidden message here..."
+                    />
+                ) : (
+                    <div
+                        className="w-full h-32 border-2 border-dashed border-gray-700 hover:border-cyan-500 rounded-lg flex flex-col items-center justify-center cursor-pointer bg-gray-900/50 transition-colors"
+                        onClick={() => fileInputRef.current?.click()}
+                    >
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            className="hidden"
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                        />
+                        {stegoImagePreview ? (
+                            <img src={stegoImagePreview} alt="Preview" className="h-full object-contain p-2" />
+                        ) : (
+                            <div className="text-center text-gray-500">
+                                <Upload className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                <span className="text-sm">Click to upload image with hidden message</span>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Password Input */}
