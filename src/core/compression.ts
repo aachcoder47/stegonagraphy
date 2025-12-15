@@ -1,12 +1,13 @@
+
 import LZString from 'lz-string';
 
 // TextEncoder/Decoder for string<->bytes
-const enc = new TextEncoder();
-const dec = new TextDecoder();
+// const enc = new TextEncoder();
+// const dec = new TextDecoder();
 
 export const compressText = (text: string): Uint8Array => {
     // Compress text using LZString to reduce size (stego space is expensive)
-    const compressedStr = LZString.compressToUTF16(text);
+    const compressed = LZString.compressToUTF16(text);
     // Convert the compressed 16-bit string into Uint16Array format, then to Uint8Array for encryption
     // Actually, UTF16 string to Uint8Array via TextEncoder might mess up the specific storage?
     // LZString produces valid UTF-16 strings. TextEncoder encodes to UTF-8.
@@ -26,7 +27,6 @@ export const compressText = (text: string): Uint8Array => {
     // Let's stick effectively to: 
     // Text -> LZString (UTF16 String) -> Uint8Array (little endian representation of chars).
 
-    const compressed = LZString.compressToUTF16(text);
     const buf = new Uint8Array(compressed.length * 2);
     const view = new Uint16Array(buf.buffer);
     for (let i = 0; i < compressed.length; i++) {

@@ -103,7 +103,7 @@ export const encrypt = async (data: Uint8Array, password: string): Promise<Encry
   const encryptedBuf = await window.crypto.subtle.encrypt(
     { name: "AES-CTR", counter: iv, length: 64 },
     key,
-    data
+    data as any
   );
 
   // Sign the encrypted payload
